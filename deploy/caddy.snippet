@@ -1,0 +1,18 @@
+# cpa-quota-cards — reverse-proxy snippet
+#
+# Put this inside the site block that already serves your CPAMP panel, so the
+# panel origin also serves the card UI and its API. That is what makes the
+# plugin page reuse the panel login state instead of asking for the key again.
+#
+# Replace the host name with your own panel host.
+
+cliproxy.example.com {
+	# ... your existing panel reverse_proxy for CPAMP ...
+
+	@cpausage path /usage /usage/*
+	handle @cpausage {
+		reverse_proxy 127.0.0.1:18390
+	}
+
+	# ... rest of your site block ...
+}

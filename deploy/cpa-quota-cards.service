@@ -1,0 +1,23 @@
+[Unit]
+Description=cpa-quota-cards quota & usage card service (read-only)
+Documentation=file:///root/cpa-quota-cards/service/server.py
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/cpa-quota-cards/service
+ExecStart=/usr/bin/python3 /root/cpa-quota-cards/service/server.py
+Environment=PYTHONUNBUFFERED=1
+# The plugin runs inside the CLIProxyAPI container (app-net) and calls back to
+# the host, so bind 0.0.0.0 and restrict the source range with your firewall.
+Environment=CPA_USAGE_BIND=0.0.0.0
+Environment=CPA_USAGE_PORT=18390
+Restart=always
+RestartSec=5
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+# build output
+dist/
+*.so
+*.h
+
+# runtime state and verification artifacts
+service/state.jsonl
+shots/
+
+# local overrides
+.env
+*.local.yaml
+
+# python
+__pycache__/
+*.pyc
+.venv/
