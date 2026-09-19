@@ -149,3 +149,20 @@ frame-ancestors 'self'`, so nothing from the CDN runs inside the card UI.
 * reusing the panel login state depends on the panel's obfuscated storage (`enc::v2::`, older
   panels `enc::v1::`). Both formats are handled; a future format change would surface as the
   manual key prompt rather than as wrong numbers.
+
+## 7. Mount re-alignment after the config edit (2026-09-19)
+
+While installing, `config.yaml` was rewritten in place (same inode) — but an earlier edit had used
+an atomic replace, which left the CLIProxyAPI bind mount pinned to the deleted inode: the host saw
+the new config while the container kept serving the old one (`cache_seconds` 5 vs. the configured 8).
+`docker restart cli-proxy-api` re-resolved the mount and the container was re-verified by a real
+browser run of `scripts/verify_panel.py` against the production panel:
+
+```
+mountinfo : /root/CLIProxyAPI/config.yaml -> /CLIProxyAPI/config.yaml   (no "//deleted")
+sha256    : host == container
+status    : {"cache_seconds":8,"page_bytes":28762,"serving":true,"version":"0.1.2"}
+panel run : sidebar_entry=额度与用量, superseded_entry_present=false, same_origin=true,
+            account_cards=3, meters=4, key_prompt_visible=false, detail_sections=11,
+            horizontal_overflow_px=0 -> ALL ASSERTIONS PASSED
+```
