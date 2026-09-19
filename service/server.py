@@ -342,6 +342,7 @@ def collect(force: bool = False) -> dict:
         "windows": c_windows, "error": c.get("error"),
         "extra_usage": c.get("extra_usage"), "limits": c.get("limits") or [],
         "note": "额度来自 Anthropic OAuth 用量接口(每次加载实时拉取)",
+        "note_key": "claude_oauth",
     })
 
     # ---- Codex(额度随响应头被动刷新,可能滞后于最后一次请求)
@@ -378,6 +379,7 @@ def collect(force: bool = False) -> dict:
             "plan": next((e.get("plan") for e in entries if e.get("plan")), None),
             "kind": "subscription", "windows": windows, "error": None,
             "note": "额度百分比随每个请求的响应头上报,数字可能滞后于最后一次请求",
+            "note_key": "codex_header",
         })
 
     # ---- 其他(不走订阅额度,只有花费)
@@ -393,6 +395,7 @@ def collect(force: bool = False) -> dict:
             "spend": usage,
             "spend_models": window_models(con, prices, prov, start, wk.get("reset_at_ms")),
             "note": "按量计费账号,没有订阅额度窗口;金额为近 7 天实际消耗",
+            "note_key": "metered",
         })
     con.close()
 

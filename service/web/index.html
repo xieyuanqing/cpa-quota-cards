@@ -142,9 +142,10 @@ footer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12
       <button class="btn hidden" id="back">← 返回列表</button>
       <button class="btn hidden" id="manualToggle">连接…</button>
       <button class="btn hidden" id="reconnect">重新读取登录态</button>
+      <button class="btn" id="lang" title="语言 / Language">EN</button>
     </div>
     <div class="manual hidden" id="manual">
-      <p>未读到 CPAMP 面板登录态。粘贴面板管理员密钥(仅存本机浏览器):</p>
+      <p id="manualText">未读到 CPAMP 面板登录态。粘贴面板管理员密钥(仅存本机浏览器):</p>
       <div class="row">
         <input type="password" id="key" placeholder="CPAMP 管理密钥" autocomplete="off">
         <button class="btn primary" id="connect">连接</button>
@@ -157,11 +158,7 @@ footer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12
   <div class="accounts" id="accounts"><div class="skeleton"></div><div class="skeleton"></div></div>
   <div id="detail"></div>
 
-  <footer>
-    消耗 = 每次请求的 未缓存输入 / 缓存读 / 缓存写 / 输出 token × 官方单价(models.dev 价格表)。<br>
-    额度 = 上游直接给的百分比:Claude 走 OAuth 用量接口实时拉取,Codex 随每个请求的响应头上报。<br>
-    「预计整窗」由本窗口已花金额与已用百分点折算;有足够历史采样时改用容量反推(过原点回归),样本越多越准。
-  </footer>
+  <footer id="foot"></footer>
 </div>
 <script data-cfasync="false">
 const API='/usage/api';
@@ -172,11 +169,145 @@ const pct=v=>(v===null||v===undefined||isNaN(v))?'—':(Math.round(v*10)/10)+'%'
 const num=n=>n===null||n===undefined?'—':Number(n).toLocaleString('en-US');
 const tok=n=>{n=Number(n)||0;if(n>=1e9)return (n/1e9).toFixed(2)+'B';if(n>=1e6)return (n/1e6).toFixed(2)+'M';if(n>=1e3)return (n/1e3).toFixed(1)+'K';return String(n)};
 const clamp=v=>Math.max(0,Math.min(100,Number(v)||0));
-const stamp=ms=>ms?new Date(ms).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'—';
-const short=ms=>ms?new Date(ms).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
+/* —— 语言:默认跟随 CPAMP 面板的语言选择(localStorage 的 cli-proxy-language),工具栏按钮可临时切换 —— */
+const STR={
+title:['额度与用量','Quota & usage'],
+subtitle:['按请求 token × 官方价格折算 · 额度百分比直接取自上游','Tokens per request × official prices · quota percentages taken straight from the upstream'],
+source:['数据源:CPAMP 用量库 + 上游额度','Source: CPAMP usage DB + upstream quota'],
+refresh:['刷新','Refresh'],
+back:['← 返回列表','← Back to list'],
+manualToggle:['连接…','Connect…'],
+reconnect:['重新读取登录态','Re-read panel session'],
+manualPrompt:['未读到 CPAMP 面板登录态。粘贴面板管理员密钥(仅存本机浏览器):','No CPAMP panel session found. Paste the panel admin key (kept in this browser only):'],
+keyPlaceholder:['CPAMP 管理密钥','CPAMP admin key'],
+connect:['连接','Connect'],
+loading:['读取中…','Loading…'],
+updatedAt:['更新于 {0}','updated {0}'],
+waiting:['正在等待面板登录态…如未自动读到,请在上方手动连接。','Waiting for the panel session… if it is not picked up automatically, connect manually above.'],
+authRequired:['需要登录态','Session required'],
+authNote:['未读到有效的面板登录态,请在上方连接或重新登录 CPAMP 面板。','No valid panel session found — connect above, or sign in to the CPAMP panel again.'],
+readFailed:['读取失败','Read failed'],
+readFailedMsg:['读取失败:{0}','Read failed: {0}'],
+usedLeft:['已用 <b>{0}</b> · 剩 {1}','used <b>{0}</b> · left {1}'],
+resets:['重置 {0}','resets {0}'],
+thisWindow:['本窗口 <b>{0}</b> · {1} 请求 · {2} tok','this window <b>{0}</b> · {1} requests · {2} tok'],
+projected:['预计整窗 <b>{0}</b>','projected full window <b>{0}</b>'],
+leftStr:['　　还有 {0}',' · {0} left'],
+winName:['{0}窗口','{0} window'],
+labFiveHour:['5 小时','5-hour'],
+labWeekly:['周','week'],
+note_claude_oauth:['额度来自 Anthropic OAuth 用量接口(每次加载实时拉取)','Quota comes from the Anthropic OAuth usage endpoint (fetched live on every load)'],
+note_codex_header:['额度百分比随每个请求的响应头上报,数字可能滞后于最后一次请求','Quota percentage is reported in each request\'s response headers, so it can lag behind the last request'],
+note_metered:['按量计费账号,没有订阅额度窗口;金额为近 7 天实际消耗','Pay-as-you-go account: no subscription quota window; the amount is the actual spend of the last 7 days'],
+maxed:['已打满','maxed out'],
+usedSuffix:['{0} 已用','{0} used'],
+spend7d:['近 7 天消耗','Last 7 days'],
+reqTok:['请求 / token','Requests / tokens'],
+quotaReadFailed:['额度读取失败:{0}','Quota read failed: {0}'],
+tagError:['额度异常','Quota error'],
+tagMetered:['按量计费','Pay as you go'],
+tagNone:['无额度','No quota'],
+tagBad:['额度打满','Quota exhausted'],
+tagNear:['接近上限','Near limit'],
+tagOk:['额度正常','Quota OK'],
+acctDetail:['账号详情','Account detail'],
+billing:['计费类型','Billing'],
+billingMetered:['按量计费(无订阅额度)','Pay as you go (no subscription quota)'],
+billingSub:['订阅额度窗口','Subscription quota windows'],
+planOrg:['套餐 / 组织','Plan / organisation'],
+scope:['账号作用域','Account scope'],
+basisCol:['数据口径','Method'],
+rawId:['原始标识:{0}','Raw identifier: {0}'],
+winFull:['{0}窗口 · 完整分析','{0} window · full analysis'],
+quotaUnknown:['额度未知','Quota unknown'],
+quotaMaxed:['额度已打满','Quota exhausted'],
+quotaLeft:['剩余 {0}','{0} left'],
+winMeta:['{0}窗口 · 起点 {1} · 重置 {2}','{0} window · starts {1} · resets {2}'],
+winMetaLeft:['（还有 {0}）',' ({0} left)'],
+reqInWin:['窗口内请求','Requests in window'],
+callsN:['{0} 次','{0} calls'],
+callsFailed:['（失败 {0}，成功 {1}）',' ({0} failed, {1} ok)'],
+callsAllOk:['（成功率 100%）',' (100% success)'],
+totalTok:['Token 合计','Total tokens'],
+uncachedInOut:['未缓存输入 / 输出','Uncached input / output'],
+cacheRW:['缓存读 / 缓存写','Cache read / write'],
+spendWin:['本窗口消耗','Spend this window'],
+perPercent:['每 1% 额度 ≈','Per 1% of quota ≈'],
+estLeft:['推算剩余额度','Estimated quota left'],
+quotaSource:['额度来源','Quota source'],
+observed:[' · 观测 {0}',' · observed {0}'],
+unpriced:['无官方单价的模型:{0}','Models without an official price: {0}'],
+forecast:['额度预测','Quota forecast'],
+forecastSub:['按「已用百分点」把本窗口的实测值折算到整窗(与 CPAMP 凭证页的预测同口径)','Scales this window\u2019s measured usage by the quota percentage consumed (same method as the CPAMP credentials page)'],
+estCalls:['预计请求','Projected requests'],
+estTokens:['预计 Token','Projected tokens'],
+estCost:['预计花费','Projected spend'],
+successRate:['成功率','Success rate'],
+basisLabel:['依据:{0}','Basis: {0}'],
+basisProvider:['本窗口已用 {0}，折算系数 ×{1}','{0} of this window used → factor ×{1}'],
+basisWindow:['沿用上个满窗窗口(起点 {0})的实测值','reusing the last full window (starts {0})'],
+forecastNA:['暂不可预测:本窗口还没有额度百分比或用量样本','Not predictable yet: this window has no quota percentage or usage sample'],
+capacity:['容量反推','Capacity back-calculation'],
+capacitySub:['用历史采样把「100% 额度 ≈ 多少钱」推出来;样本越多越准','Derives "100% of quota ≈ how many dollars" from historical samples — more samples, better accuracy'],
+fullWindowCap:['整窗容量(预计总金额)','Full-window capacity (projected total)'],
+basisCol2:['反推依据','Derived from'],
+basisHistory:['历史采样过原点回归','history samples, through-origin regression'],
+basisThisWindow:['本窗口已花 ÷ 已用百分点','spend this window ÷ percentage points used'],
+basisInsufficient:['不足','insufficient'],
+regSamples:['回归样本','Regression samples'],
+samplesFmt:['{0} 段 / {1} 个窗口 · 离散 ±{2}%','{0} segments / {1} windows · spread ±{2}%'],
+samplesNone:['暂无(单窗口折算)','none yet (single-window scaling)'],
+regSlope:['回归斜率','Regression slope'],
+perPoint:['{0} / 个百分点','{0} / percentage point'],
+fullWindows:['满窗实测记录','Measured full windows'],
+none:['暂无','none'],
+modelMix:['模型构成','Model mix'],
+modelMixSub:['本窗口按模型拆分的费用与 token','Spend and tokens by model in this window'],
+unknownModel:['未知','unknown'],
+modelTok:['{0} 次 · {1} · 出 {2}','{0} calls · {1} · out {2}'],
+noReqWin:['本窗口暂无请求','No requests in this window'],
+spendSec:['消耗','Spend'],
+last7:['近 7 天','Last 7 days'],
+amount:['金额','Amount'],
+extraUsage:['额外用量包','Extra usage'],
+enabledCol:['是否启用','Enabled'],
+enabledYes:['已启用','enabled'],
+enabledNo:['未启用','disabled'],
+enabledNoReason:['未启用（{0}）','disabled ({0})'],
+credit:['额度','Credit'],
+upstreamMarks:['上游额度标记','Upstream quota markers'],
+accountsCount:['共 {0} 个账号 · 更新于 {1}','{0} accounts · updated {1}'],
+noAccounts:['没有账号','No accounts'],
+someMaxed:['有窗口已打满','A window is maxed out'],
+quotaOk:['额度读取正常','Quota read OK'],
+agoJust:['刚刚','just now'],
+agoMin:['{0} 分钟前','{0} min ago'],
+agoHour:['{0} 小时前','{0} h ago'],
+agoDay:['{0} 天前','{0} d ago'],
+foot:['消耗 = 每次请求的 未缓存输入 / 缓存读 / 缓存写 / 输出 token × 官方单价(models.dev 价格表)。<br>额度 = 上游直接给的百分比:Claude 走 OAuth 用量接口实时拉取,Codex 随每个请求的响应头上报。<br>「预计整窗」由本窗口已花金额与已用百分点折算;有足够历史采样时改用容量反推(过原点回归),样本越多越准。','Spend = uncached input / cache read / cache write / output tokens of every request × official unit prices (models.dev price table).<br>Quota = the percentage the upstream reports: Claude is pulled live from the OAuth usage endpoint, Codex is reported in each request\u2019s response headers.<br>"Projected full window" scales this window\u2019s spend by the quota percentage used; once enough history exists it switches to capacity back-calculation (through-origin regression) — the more samples, the better.']
+};
+const langOf=l=>String(l||'').toLowerCase().indexOf('zh')===0?'zh':'en';
+function detectLang(){
+  /* 面板自己存的语言(同源 localStorage,面板换语言这里也跟着换) */
+  try{
+    const raw=localStorage.getItem('cli-proxy-language');
+    if(raw){const v=JSON.parse(raw);const l=(v&&v.state&&v.state.language)||(v&&v.language);if(l)return langOf(l)}
+  }catch(e){}
+  /* 面板文档本身;再退化到浏览器语言 */
+  try{if(window!==parent){const l=parent.document.documentElement.lang;if(l)return langOf(l)}}catch(e){}
+  return langOf(navigator.language);
+}
+let LANG=detectLang(),OVERRIDE=false;
+const LOCALE=()=>LANG==='zh'?'zh-CN':'en-GB';
+const t=(k,...a)=>{const e=STR[k];if(!e)return k;let s=e[LANG==='zh'?0:1]||e[0];return a.length?s.replace(/\{(\d+)\}/g,(m,i)=>a[i]):s};
+const stamp=ms=>ms?new Date(ms).toLocaleString(LOCALE(),{timeZone:'Asia/Shanghai',hour12:false}):'—';
+const short=ms=>ms?new Date(ms).toLocaleString(LOCALE(),{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 const esc=s=>String(s===null||s===undefined?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const tone=u=>u>=99.5?'bad':u>=89?'warn':u>=70?'info':'good';
-function ago(ms){const d=Date.now()-ms;if(!ms)return '';if(d<60000)return '刚刚';if(d<3600000)return Math.floor(d/60000)+' 分钟前';if(d<86400000)return Math.floor(d/3600000)+' 小时前';return Math.floor(d/86400000)+' 天前'}
+function ago(ms){const d=Date.now()-ms;if(!ms)return '';if(d<60000)return t('agoJust');if(d<3600000)return t('agoMin',Math.floor(d/60000));if(d<86400000)return t('agoHour',Math.floor(d/3600000));return t('agoDay',Math.floor(d/86400000))}
+/* 窗口标签与「数据口径」说明由后端给中文原文,这里按 kind / note_key 本地化 */
+function wl(w){const k=w&&w.kind;return k==='five_hour'?t('labFiveHour'):(k==='weekly'?t('labWeekly'):((w&&w.label)||''))}
+function noteOf(a){const k=a&&a.note_key;return (k&&STR['note_'+k])?t('note_'+k):((a&&a.note)||'')}
 
 /* 复用 CPAMP 面板登录态(同源,存储是异或混淆的;v2 只用 host,v1 还掺 UA) */
 function decodePanelStorage(raw){
@@ -220,13 +351,13 @@ async function api(path){
 }
 
 function windowHtml(w,compact){
-  const u=clamp(w.used_percent),t=tone(u),us=w.usage||{};
-  const cap=`<div class="meter-cap"><span>已用 <b>${pct(w.used_percent)}</b> · 剩 ${pct(w.remaining_percent)}</span><span>${w.reset_at_ms?('重置 '+short(w.reset_at_ms)):'—'}</span></div>`;
-  const spend=`<div class="meter-cap"><span>本窗口 <b>${money2(us.cost)}</b> · ${num(us.calls)} 请求 · ${tok(us.total)} tok</span><span>预计整窗 <b>${money2(w.est_total_cost)}</b></span></div>`;
-  const left=w.left_str?`　　还有 ${w.left_str}`:'';
+  const u=clamp(w.used_percent),tn=tone(u),us=w.usage||{};
+  const cap=`<div class="meter-cap"><span>${t('usedLeft',pct(w.used_percent),pct(w.remaining_percent))}</span><span>${w.reset_at_ms?t('resets',short(w.reset_at_ms)):'—'}</span></div>`;
+  const spend=`<div class="meter-cap"><span>${t('thisWindow',money2(us.cost),num(us.calls),tok(us.total))}</span><span>${t('projected',money2(w.est_total_cost))}</span></div>`;
+  const left=w.left_str?t('leftStr',w.left_str):'';
   return `<div class="win">
-    <div class="win-top"><span class="win-name">${esc(w.label)}窗口</span><span class="win-val">${u>=99.5?'已打满':pct(w.used_percent)+' 已用'}${left}</span></div>
-    <div class="meter"><div class="meter-fill" data-tone="${t}" style="width:${u}%"></div></div>
+    <div class="win-top"><span class="win-name">${esc(t('winName',wl(w)))}</span><span class="win-val">${u>=99.5?t('maxed'):t('usedSuffix',pct(w.used_percent))}${left}</span></div>
+    <div class="meter"><div class="meter-fill" data-tone="${tn}" style="width:${u}%"></div></div>
     ${compact?spend:cap+spend}
   </div>`;
 }
@@ -234,9 +365,9 @@ function windowHtml(w,compact){
 function cardHtml(a){
   const tag=cardTag(a);
   const wins=(a.windows||[]).map(w=>windowHtml(w,true)).join('');
-  const metered=a.spend?`<div class="rows"><div><dt>近 7 天消耗</dt><dd>${money2(a.spend.cost)}</dd></div>
-    <div><dt>请求 / token</dt><dd>${num(a.spend.calls)} / ${tok(a.spend.total)}</dd></div></div>`:'';
-  const err=a.error?`<div class="basis warn">额度读取失败:${esc(a.error)}</div>`:'';
+  const metered=a.spend?`<div class="rows"><div><dt>${t('spend7d')}</dt><dd>${money2(a.spend.cost)}</dd></div>
+    <div><dt>${t('reqTok')}</dt><dd>${num(a.spend.calls)} / ${tok(a.spend.total)}</dd></div></div>`:'';
+  const err=a.error?`<div class="basis warn">${t('quotaReadFailed',esc(a.error))}</div>`:'';
   return `<a class="card acct" data-provider="${esc(a.provider)}" href="#acct=${encodeURIComponent(a.id)}">
     <div class="acct-head">
       <div class="glyph">${esc((a.provider_label||a.provider||'?').slice(0,2).toUpperCase())}</div>
@@ -248,18 +379,18 @@ function cardHtml(a){
 }
 
 function cardTag(a){
-  if(a.error)return{tone:'warn',text:'额度异常'};
-  if(!a.windows||!a.windows.length)return{tone:'idle',text:a.kind==='metered'?'按量计费':'无额度'};
+  if(a.error)return{tone:'warn',text:t('tagError')};
+  if(!a.windows||!a.windows.length)return{tone:'idle',text:a.kind==='metered'?t('tagMetered'):t('tagNone')};
   const us=a.windows.map(w=>Number(w.used_percent)||0);
   const top=Math.max(...us);
-  if(top>=99.5)return{tone:'bad',text:'额度打满'};
-  if(top>=89)return{tone:'warn',text:'接近上限'};
-  return{tone:'good',text:'额度正常'};
+  if(top>=99.5)return{tone:'bad',text:t('tagBad')};
+  if(top>=89)return{tone:'warn',text:t('tagNear')};
+  return{tone:'good',text:t('tagOk')};
 }
 
 function detailHtml(a){
   const title=esc(a.provider_label||a.provider);
-  let out=`<div class="sec-title">账号详情</div>
+  let out=`<div class="sec-title">${t('acctDetail')}</div>
   <div class="card sec">
     <div class="dt-head" data-provider="${esc(a.provider)}">
       <div class="glyph">${esc((a.provider_label||a.provider||'?').slice(0,2).toUpperCase())}</div>
@@ -267,96 +398,96 @@ function detailHtml(a){
       <span class="tag" data-tone="${cardTag(a).tone}">${esc(cardTag(a).text)}</span>
     </div>
     <div class="rows" style="margin-top:14px">
-      <div><dt>计费类型</dt><dd>${a.kind==='metered'?'按量计费(无订阅额度)':'订阅额度窗口'}</dd></div>
-      ${a.plan?`<div><dt>套餐 / 组织</dt><dd>${esc(a.plan)}</dd></div>`:''}
-      ${a.account_scope?`<div><dt>账号作用域</dt><dd class="mono">${esc(a.account_scope)}</dd></div>`:''}
-      <div><dt>数据口径</dt><dd style="max-width:60%">${esc(a.note||'')}</dd></div>
+      <div><dt>${t('billing')}</dt><dd>${a.kind==='metered'?t('billingMetered'):t('billingSub')}</dd></div>
+      ${a.plan?`<div><dt>${t('planOrg')}</dt><dd>${esc(a.plan)}</dd></div>`:''}
+      ${a.account_scope?`<div><dt>${t('scope')}</dt><dd class="mono">${esc(a.account_scope)}</dd></div>`:''}
+      <div><dt>${t('basisCol')}</dt><dd style="max-width:60%">${esc(noteOf(a))}</dd></div>
     </div>
-    ${a.account_raw?`<div class="src" style="margin-top:12px">原始标识:${esc(a.account_raw)}</div>`:''}
+    ${a.account_raw?`<div class="src" style="margin-top:12px">${t('rawId',esc(a.account_raw))}</div>`:''}
   </div>`;
 
   (a.windows||[]).forEach(w=>{
     const us=w.usage||{},fc=w.forecast||{},cap=w.capacity||{};
     const okUs=us.calls?((us.calls-(us.failed||0))/us.calls*100):null;
-    out+=`<div class="sec-title">${esc(w.label)}窗口 · 完整分析</div>
+    out+=`<div class="sec-title">${t('winFull',esc(wl(w)))}</div>
     <div class="card sec">
-      <h4>${w.used_percent===null?'额度未知':(clamp(w.used_percent)>=99.5?'额度已打满':'剩余 '+pct(w.remaining_percent))}</h4>
-      <p class="sec-sub">${esc(w.label)}窗口 · 起点 ${short(w.window_start_ms)} · 重置 ${short(w.reset_at_ms)}${w.left_str?'（还有 '+esc(w.left_str)+'）':''}</p>
+      <h4>${w.used_percent===null?t('quotaUnknown'):(clamp(w.used_percent)>=99.5?t('quotaMaxed'):t('quotaLeft',pct(w.remaining_percent)))}</h4>
+      <p class="sec-sub">${t('winMeta',esc(wl(w)),short(w.window_start_ms),short(w.reset_at_ms))}${w.left_str?t('winMetaLeft',esc(w.left_str)):''}</p>
       ${windowHtml(w,false)}
       <div class="rows" style="margin-top:14px">
-        <div><dt>窗口内请求</dt><dd>${num(us.calls)} 次${us.failed?`（失败 ${num(us.failed)}，成功 ${okUs===null?'—':okUs.toFixed(1)+'%'}）`:'（成功率 100%）'}</dd></div>
-        <div><dt>Token 合计</dt><dd>${tok(us.total)}</dd></div>
-        <div><dt>未缓存输入 / 输出</dt><dd>${tok(us.in)} / ${tok(us.out)}</dd></div>
-        <div><dt>缓存读 / 缓存写</dt><dd>${tok(us.cache_read)} / ${tok(us.cache_creation)}</dd></div>
-        <div><dt>本窗口消耗</dt><dd>${money2(us.cost)}</dd></div>
-        <div><dt>每 1% 额度 ≈</dt><dd>${w.per_percent_cost?money(w.per_percent_cost):'—'}</dd></div>
-        <div><dt>推算剩余额度</dt><dd>${w.est_remaining_cost!==null&&w.est_remaining_cost!==undefined?money2(w.est_remaining_cost):'—'}</dd></div>
-        <div><dt>额度来源</dt><dd class="mono">${esc(w.source||'—')}${w.observed_str?' · 观测 '+short(w.observed_at_ms):''}</dd></div>
+        <div><dt>${t('reqInWin')}</dt><dd>${t('callsN',num(us.calls))}${us.failed?t('callsFailed',num(us.failed),okUs===null?'—':okUs.toFixed(1)+'%'):t('callsAllOk')}</dd></div>
+        <div><dt>${t('totalTok')}</dt><dd>${tok(us.total)}</dd></div>
+        <div><dt>${t('uncachedInOut')}</dt><dd>${tok(us.in)} / ${tok(us.out)}</dd></div>
+        <div><dt>${t('cacheRW')}</dt><dd>${tok(us.cache_read)} / ${tok(us.cache_creation)}</dd></div>
+        <div><dt>${t('spendWin')}</dt><dd>${money2(us.cost)}</dd></div>
+        <div><dt>${t('perPercent')}</dt><dd>${w.per_percent_cost?money(w.per_percent_cost):'—'}</dd></div>
+        <div><dt>${t('estLeft')}</dt><dd>${w.est_remaining_cost!==null&&w.est_remaining_cost!==undefined?money2(w.est_remaining_cost):'—'}</dd></div>
+        <div><dt>${t('quotaSource')}</dt><dd class="mono">${esc(w.source||'—')}${w.observed_str?t('observed',short(w.observed_at_ms)):''}</dd></div>
       </div>
-      ${w.unpriced&&w.unpriced.length?`<div class="basis warn">无官方单价的模型:${esc(w.unpriced.join(', '))}</div>`:''}
+      ${w.unpriced&&w.unpriced.length?`<div class="basis warn">${t('unpriced',esc(w.unpriced.join(', ')))}</div>`:''}
     </div>
 
     <div class="card sec">
-      <h4 style="font-size:15px">额度预测</h4>
-      <p class="sec-sub">按「已用百分点」把本窗口的实测值折算到整窗(与 CPAMP 凭证页的预测同口径)</p>
+      <h4 style="font-size:15px">${t('forecast')}</h4>
+      <p class="sec-sub">${t('forecastSub')}</p>
       ${fc.available?`<div class="fc">
-        <div><div class="k">预计请求</div><div class="v">${num(fc.est_calls)}</div></div>
-        <div><div class="k">预计 Token</div><div class="v">${tok(fc.est_tokens)}</div></div>
-        <div><div class="k">预计花费</div><div class="v">${money2(fc.est_cost)}</div></div>
-        <div><div class="k">成功率</div><div class="v">${fc.success_rate===null||fc.success_rate===undefined?'—':fc.success_rate+'%'}</div></div>
+        <div><div class="k">${t('estCalls')}</div><div class="v">${num(fc.est_calls)}</div></div>
+        <div><div class="k">${t('estTokens')}</div><div class="v">${tok(fc.est_tokens)}</div></div>
+        <div><div class="k">${t('estCost')}</div><div class="v">${money2(fc.est_cost)}</div></div>
+        <div><div class="k">${t('successRate')}</div><div class="v">${fc.success_rate===null||fc.success_rate===undefined?'—':fc.success_rate+'%'}</div></div>
       </div>
-      <div class="basis">依据:${fc.basis==='provider_percent'
-        ?`本窗口已用 ${pct(fc.used_percent_snapshot)}，折算系数 ×${fc.factor}`
-        :`沿用上个满窗窗口(起点 ${esc(short(fc.source_window_start_ms))})的实测值`}</div>`:
-      `<div class="basis">暂不可预测:本窗口还没有额度百分比或用量样本</div>`}
+      <div class="basis">${fc.basis==='provider_percent'
+        ?t('basisProvider',pct(fc.used_percent_snapshot),fc.factor)
+        :t('basisWindow',esc(short(fc.source_window_start_ms)))}</div>`:
+      `<div class="basis">${t('forecastNA')}</div>`}
     </div>
 
     <div class="card sec">
-      <h4 style="font-size:15px">容量反推</h4>
-      <p class="sec-sub">用历史采样把「100% 额度 ≈ 多少钱」推出来;样本越多越准</p>
+      <h4 style="font-size:15px">${t('capacity')}</h4>
+      <p class="sec-sub">${t('capacitySub')}</p>
       <div class="rows">
-        <div><dt>整窗容量(预计总金额)</dt><dd>${money2(w.est_total_cost)}</dd></div>
-        <div><dt>反推依据</dt><dd>${w.est_basis==='history'?'历史采样过原点回归':(w.est_basis==='this_window'?'本窗口已花 ÷ 已用百分点':'不足')}</dd></div>
-        <div><dt>回归样本</dt><dd>${cap.samples?`${cap.samples} 段 / ${cap.windows} 个窗口 · 离散 ±${cap.spread_pct}%`:'暂无(单窗口折算)'}</dd></div>
-        ${cap.per_percent?`<div><dt>回归斜率</dt><dd>${money(cap.per_percent)} / 个百分点</dd></div>`:''}
-        <div><dt>满窗实测记录</dt><dd>${(w.full_windows&&w.full_windows.length)?w.full_windows.map(f=>`${short(f.window_start_ms)} → ${money2(f.cost)}`).join('<br>'):'暂无'}</dd></div>
+        <div><dt>${t('fullWindowCap')}</dt><dd>${money2(w.est_total_cost)}</dd></div>
+        <div><dt>${t('basisCol2')}</dt><dd>${w.est_basis==='history'?t('basisHistory'):(w.est_basis==='this_window'?t('basisThisWindow'):t('basisInsufficient'))}</dd></div>
+        <div><dt>${t('regSamples')}</dt><dd>${cap.samples?t('samplesFmt',cap.samples,cap.windows,cap.spread_pct):t('samplesNone')}</dd></div>
+        ${cap.per_percent?`<div><dt>${t('regSlope')}</dt><dd>${money(cap.per_percent)}${t('perPoint','')}</dd></div>`:''}
+        <div><dt>${t('fullWindows')}</dt><dd>${(w.full_windows&&w.full_windows.length)?w.full_windows.map(f=>`${short(f.window_start_ms)} → ${money2(f.cost)}`).join('<br>'):t('none')}</dd></div>
       </div>
     </div>
 
     <div class="card sec">
-      <h4 style="font-size:15px">模型构成</h4>
-      <p class="sec-sub">本窗口按模型拆分的费用与 token</p>
+      <h4 style="font-size:15px">${t('modelMix')}</h4>
+      <p class="sec-sub">${t('modelMixSub')}</p>
       ${(w.models&&w.models.length)?`<div class="models">${w.models.map(m=>`<div>
-        <span class="m-name">${esc(m.model||'未知')}</span>
-        <span class="m-tok">${num(m.calls)} 次 · ${tok(m.total)} · 出 ${tok(m.out)}</span>
+        <span class="m-name">${esc(m.model||t('unknownModel'))}</span>
+        <span class="m-tok">${t('modelTok',num(m.calls),tok(m.total),tok(m.out))}</span>
         <span class="m-cost">${money(m.cost)}${m.priced?'':' ?'}</span></div>`).join('')}</div>`
-      :'<div class="basis">本窗口暂无请求</div>'}
+      :`<div class="basis">${t('noReqWin')}</div>`}
     </div>`;
   });
 
   if(a.spend){
-    out+=`<div class="sec-title">消耗</div><div class="card sec">
-      <h4 style="font-size:15px">近 7 天</h4>
+    out+=`<div class="sec-title">${t('spendSec')}</div><div class="card sec">
+      <h4 style="font-size:15px">${t('last7')}</h4>
       <div class="rows">
-        <div><dt>金额</dt><dd>${money2(a.spend.cost)}</dd></div>
-        <div><dt>请求 / token</dt><dd>${num(a.spend.calls)} / ${tok(a.spend.total)}</dd></div>
+        <div><dt>${t('amount')}</dt><dd>${money2(a.spend.cost)}</dd></div>
+        <div><dt>${t('reqTok')}</dt><dd>${num(a.spend.calls)} / ${tok(a.spend.total)}</dd></div>
       </div>
       ${(a.spend_models&&a.spend_models.length)?`<div class="models">${a.spend_models.map(m=>`<div>
-        <span class="m-name">${esc(m.model||'未知')}</span>
-        <span class="m-tok">${num(m.calls)} 次 · ${tok(m.total)}</span>
+        <span class="m-name">${esc(m.model||t('unknownModel'))}</span>
+        <span class="m-tok">${t('callsN',num(m.calls))} · ${tok(m.total)}</span>
         <span class="m-cost">${money(m.cost)}</span></div>`).join('')}</div>`:''}
     </div>`;
   }
 
   if(a.extra_usage){
     const e=a.extra_usage;
-    out+=`<div class="sec-title">额外用量包</div><div class="card sec"><div class="rows">
-      <div><dt>是否启用</dt><dd>${e.is_enabled?'已启用':'未启用'+(e.disabled_reason?`（${esc(e.disabled_reason)}）`:'')}</dd></div>
-      ${e.used_credits?`<div><dt>额度</dt><dd>${money2(e.used_credits)} ${esc(e.currency||'')}</dd></div>`:''}
+    out+=`<div class="sec-title">${t('extraUsage')}</div><div class="card sec"><div class="rows">
+      <div><dt>${t('enabledCol')}</dt><dd>${e.is_enabled?t('enabledYes'):(e.disabled_reason?t('enabledNoReason',esc(e.disabled_reason)):t('enabledNo'))}</dd></div>
+      ${e.used_credits?`<div><dt>${t('credit')}</dt><dd>${money2(e.used_credits)} ${esc(e.currency||'')}</dd></div>`:''}
     </div></div>`;
   }
   if(a.limits&&a.limits.length){
-    out+=`<div class="sec-title">上游额度标记</div><div class="card sec"><div class="rows">
+    out+=`<div class="sec-title">${t('upstreamMarks')}</div><div class="card sec"><div class="rows">
       ${a.limits.map(l=>`<div><dt>${esc(l.kind)}</dt><dd>${pct(l.percent)} · ${esc(l.severity||'')}${l.resets_at?' · '+esc(short(Date.parse(l.resets_at))):''}</dd></div>`).join('')}
     </div></div>`;
   }
@@ -365,11 +496,11 @@ function detailHtml(a){
 
 function renderList(){
   const list=(DATA.accounts||[]);
-  $('summary').textContent=`共 ${list.length} 个账号 · 更新于 ${stamp(DATA.generated_ms)}`;
-  $('accounts').innerHTML=list.map(cardHtml).join('')||'<div class="basis">没有账号</div>';
+  $('summary').textContent=t('accountsCount',list.length,stamp(DATA.generated_ms));
+  $('accounts').innerHTML=list.map(cardHtml).join('')||`<div class="basis">${t('noAccounts')}</div>`;
   const top=list.flatMap(a=>a.windows||[]).map(w=>Number(w.used_percent)||0);
   $('srcpill').className='pill plain';
-  $('srcpill').textContent=top.some(v=>v>=99.5)?'有窗口已打满':'额度读取正常';
+  $('srcpill').textContent=top.some(v=>v>=99.5)?t('someMaxed'):t('quotaOk');
   if(top.some(v=>v>=99.5)){$('srcpill').className='pill warn';}
 }
 
@@ -382,32 +513,32 @@ async function load(force){
       current=null;history.replaceState(null,'','#');
     }
     $('detail').innerHTML='';$('accounts').classList.remove('hidden');
-    $('back').classList.add('hidden');$('title').textContent='额度与用量';
+    $('back').classList.add('hidden');$('title').textContent=t('title');
     renderList();
-    $('stamp').textContent='更新于 '+stamp(DATA.generated_ms);
+    $('stamp').textContent=t('updatedAt',stamp(DATA.generated_ms));
     $('stamp').className='pill';
     setNote('');
   }catch(e){
     $('stamp').className='pill warn';
     if(e.message==='AUTH'){
-      $('stamp').textContent='需要登录态';
-      setNote('未读到有效的面板登录态,请在上方连接或重新登录 CPAMP 面板。','warn');
+      $('stamp').textContent=t('authRequired');
+      setNote(t('authNote'),'warn');
       $('manual').classList.remove('hidden');$('manualToggle').classList.add('hidden');$('reconnect').classList.remove('hidden');
     }else{
-      $('stamp').textContent='读取失败';
-      setNote('读取失败:'+esc(e.message),'warn');
+      $('stamp').textContent=t('readFailed');
+      setNote(t('readFailedMsg',esc(e.message)),'warn');
     }
   }
 }
 
 async function openDetail(id){
   current=id;$('accounts').classList.add('hidden');$('back').classList.remove('hidden');
-  $('title').textContent='账号详情';$('detail').innerHTML='<div class="skeleton"></div>';
+  $('title').textContent=t('acctDetail');$('detail').innerHTML='<div class="skeleton"></div>';
   const d=await api('/accounts/'+encodeURIComponent(id)+'?force=1').catch(async()=>{ // 先强刷一次再回落
     return await api('/accounts/'+encodeURIComponent(id));
   });
   $('detail').innerHTML=detailHtml(d.account);
-  $('stamp').textContent='更新于 '+stamp(d.generated_ms);
+  $('stamp').textContent=t('updatedAt',stamp(d.generated_ms));
 }
 
 function route(){
@@ -415,17 +546,43 @@ function route(){
   const id=m?decodeURIComponent(m[1]):null;
   if(!id){
     current=null;$('accounts').classList.remove('hidden');$('detail').innerHTML='';
-    $('back').classList.add('hidden');$('title').textContent='额度与用量';
+    $('back').classList.add('hidden');$('title').textContent=t('title');
     if(DATA)renderList();
     return;
   }
   openDetail(id);
 }
 
+/* 静态文案 + 跟随面板语言 */
+function applyStatic(){
+  document.documentElement.lang=LANG==='zh'?'zh-CN':'en';
+  document.title=t('title');
+  $('title').textContent=t('title');
+  $('subsub').textContent=t('subtitle');
+  $('srcpill').textContent=t('source');
+  $('stamp').textContent=t('loading');
+  $('refresh').textContent=t('refresh');
+  $('back').textContent=t('back');
+  $('manualToggle').textContent=t('manualToggle');
+  $('reconnect').textContent=t('reconnect');
+  $('manualText').textContent=t('manualPrompt');
+  $('key').placeholder=t('keyPlaceholder');
+  $('connect').textContent=t('connect');
+  $('lang').textContent=LANG==='zh'?'EN':'中文';
+  $('lang').title=(LANG==='zh'?'Switch to English':'切换到中文');
+  $('foot').innerHTML=t('foot');
+}
+function setLang(l,override){
+  LANG=l;if(override)OVERRIDE=true;
+  applyStatic();
+  if(DATA)route();
+}
+
 function boot(){
   KEY=panelKey()||localStorage.getItem('cpa-usage-key')||'';
+  applyStatic();
   if(!KEY){
-    setNote('正在等待面板登录态…如未自动读到,请在上方手动连接。','');
+    setNote(t('waiting'),'');
     $('manual').classList.remove('hidden');$('manualToggle').classList.remove('hidden');$('reconnect').classList.remove('hidden');
   }else{
     $('manual').classList.add('hidden');$('manualToggle').classList.add('hidden');$('reconnect').classList.remove('hidden');
@@ -439,9 +596,13 @@ $('refresh').onclick=()=>load(true);
 $('back').onclick=()=>{location.hash=''};
 $('manualToggle').onclick=()=>$('manual').classList.toggle('hidden');
 $('reconnect').onclick=boot;
+$('lang').onclick=()=>setLang(LANG==='zh'?'en':'zh',true);
 $('connect').onclick=()=>{const v=$('key').value.trim();if(!v)return;KEY=v;localStorage.setItem('cpa-usage-key',v);$('key').value='';$('manual').classList.add('hidden');load()};
 $('key').addEventListener('keydown',e=>{if(e.key==='Enter')$('connect').click()});
 addEventListener('hashchange',route);
-addEventListener('storage',e=>{if(e.key==='cli-proxy-auth')boot()});
+addEventListener('storage',e=>{
+  if(e.key==='cli-proxy-auth')boot();
+  if(!OVERRIDE&&e.key==='cli-proxy-language')setLang(detectLang()); /* 面板里换了语言,这里跟着换 */
+});
 boot();
 </script></html>

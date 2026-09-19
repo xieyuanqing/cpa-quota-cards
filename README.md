@@ -12,11 +12,28 @@ It shows one card per account — 5-hour and weekly quota meters, spend, project
 cost — and a full analysis page per account (including a capacity back-calculation and the
 quota prediction the manager panel used to provide). The page is mounted **inside the CPA
 Manager Plus sidebar** as 「额度与用量」, reusing the panel login state, so there is no second
-credential prompt.
+credential prompt. The interface is bilingual (English / 简体中文) and follows the panel's own
+language setting.
 
 It does **not** reset provider limits, change quotas, or write to anything. The service opens
 the manager database read-only (`file:...?mode=ro`) and the price table it uses is the one the
 manager already keeps.
+
+## Screenshots
+
+One card per account, with the quota meters, the spend and the projected full-window cost.
+Every screenshot in this repository has account identifiers masked.
+
+![Quota cards, English](docs/quota-cards-en.png)
+
+The page follows the **panel's language**, so switching the panel to 中文 switches the plugin
+too — it reads the panel's own language store and reacts live:
+
+![额度与用量,中文界面](docs/quota-cards-zh.png)
+
+Clicking a card opens the full analysis: quota forecast, capacity back-calculation, model mix.
+
+![Account detail](docs/quota-detail-en.png)
 
 ## How it counts
 
@@ -110,10 +127,17 @@ when both live on the same host.
 ```bash
 scripts/verify_service.py     # drives the standalone page in a real browser
 scripts/verify_panel.py       # logs into the panel, clicks the sidebar entry, asserts the cards
+scripts/verify_i18n.py        # flips the panel language and asserts the page follows it
+scripts/make_readme_shots.py  # regenerates docs/*.png, masking account identifiers
 ```
 
 Both print a JSON report and a PASS/FAIL line; screenshots land in `shots/`. See
 [VERIFICATION.md](VERIFICATION.md) for one real run.
+
+Panel-side scripts must be pointed at the **origin your reverse proxy serves**
+(`CPAMP_PANEL_URL=https://<panel-host>/management.html`), not at the manager's own port: the
+page's `/usage/api/*` calls only exist on the proxied origin, so against `127.0.0.1:18317`
+every account renders as *"Read failed: HTTP 404"*.
 
 ## Configuration
 
@@ -170,6 +194,10 @@ easy way to turn every management call into a 404.
    `CPA_BASE_URL=http://127.0.0.1:8317/v1` silently broke a whole install run.
 6. **`pkill -f <pattern>` can kill your own shell** when the pattern appears in the command line.
    Find the pid from the listening port instead.
+7. **The page's API only exists on the proxied origin.** `/usage/api/*` is routed by the reverse
+   proxy, so the plugin page works in the panel and at `https://<panel-host>/usage/`, but returns
+   `404` when the panel is opened directly on its own port. Verify panel-side behaviour through
+   the proxy.
 
 ## License
 
@@ -181,7 +209,7 @@ MIT — see [LICENSE](LICENSE). Third-party notices in
 一个 CLIProxyAPI 原生插件 + 一个只读小服务,回答两个问题:**我用了多少**、**额度还剩多少**。
 一个账号一张卡片(5 小时 / 周进度条、本窗金额、整窗预计金额),点进卡片看完整分析(含容量反推
 与面板原有的额度预测字段);页面挂在 CPA Manager Plus 左侧栏「额度与用量」,复用面板登录态,
-不再二次输入密钥。
+不再二次输入密钥。界面中英双语,默认跟随面板语言;README 里的截图已对账号打码。
 
 口径:消耗 = 每次请求 token × 官方单价(用 `normalized_*` 字段,避免 Codex 缓存 token 重复计费);
 额度 = 上游直接给的百分比(Claude 走 OAuth 用量接口,Codex 走响应头);容量 = 整窗「总花费 ÷ 总百分点」
