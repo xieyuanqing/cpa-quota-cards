@@ -78,7 +78,7 @@ never stored by the service.
 
 ## Requirements
 
-* CLIProxyAPI with plugin ABI 1 (built and tested against **v7.3.4**), Linux amd64, glibc
+* CLIProxyAPI with plugin ABI 1 (runtime-tested against **v7.3.4** on Linux amd64). Release builds are provided for Linux amd64/arm64 and Windows amd64.
 * CPA Manager Plus with its SQLite database (tested against **v1.13.1**) — for the usage events,
   the price table and the panel itself
 * Python **3.11+**, Docker (for the offline, CPU-pinned plugin build) or just a Go toolchain
@@ -198,6 +198,17 @@ easy way to turn every management call into a 404.
    proxy, so the plugin page works in the panel and at `https://<panel-host>/usage/`, but returns
    `404` when the panel is opened directly on its own port. Verify panel-side behaviour through
    the proxy.
+
+## Acknowledgements
+
+This project is a small integration of ideas and data that already existed elsewhere:
+
+* **CPA Manager Plus** provided the product idea. Its quota-prediction block and usage database had the useful pieces, but quota percentage, token spend and account history lived in different views. CPA Quota Cards combines those pieces into one account card and keeps the manager's original prediction fields in the detail view.
+* **[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)** and its MIT plugin examples provide the C ABI (`cliproxy_plugin_init`, host/plugin structs and Go bridge pattern) and the resource-page mechanism. This project only reads usage and quota information already exposed by CPA/CPAMP.
+* **[cpa-window-keeper](https://github.com/xieyuanqing/cpa-window-keeper)** proved the same-origin sidebar pattern first: a native plugin page reusing the panel login state and theme instead of asking for a second key. Its glass-card visual language also became the starting point for this dashboard.
+* **Anthropic's OAuth usage endpoint and Codex quota response headers** are the authoritative sources for the percentages shown by the meters. The plugin does not invent or reset quota values.
+* **[models.dev](https://models.dev)** is the upstream source used by CPAMP's `model_prices` table; this project reads that table rather than vendoring a price list.
+* **[patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)** drives the real-browser verification and masked README screenshot scripts.
 
 ## License
 
