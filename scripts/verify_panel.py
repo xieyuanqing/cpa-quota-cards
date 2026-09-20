@@ -18,6 +18,25 @@ ENV_FILE = pathlib.Path(os.environ.get("CPAMP_ENV_FILE", "/opt/cpa-manager-plus/
 MENU = os.environ.get("CPA_QUOTA_CARDS_MENU", "额度与用量")
 SHOTS = pathlib.Path(os.environ.get("CPA_QUOTA_CARDS_SHOTS", "/root/cpa-quota-cards/shots"))
 
+RESPONSIVE_METRICS = """(body, selector) => {
+  const root=body.querySelector(selector);
+  const rr=root.getBoundingClientRect();
+  const cards=[...root.querySelectorAll('.card')].map(el=>{
+    const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,width:r.width};
+  });
+  const offenders=[...root.querySelectorAll('*')].map(el=>{
+    const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,width:r.width};
+  }).filter(r=>r.width>0 && (r.left<rr.left-1 || r.right>rr.right+1));
+  const doc=body.ownerDocument.documentElement;
+  return {
+    viewport:doc.clientWidth,scrollWidth:doc.scrollWidth,
+    root:{left:rr.left,right:rr.right,width:rr.width},cards,
+    offender_count:offenders.length,
+    ok:doc.scrollWidth<=doc.clientWidth+1 && offenders.length===0 &&
+       cards.every(r=>r.left>=rr.left-1 && r.right<=rr.right+1)
+  };
+}"""
+
 
 def panel_key():
     for line in ENV_FILE.read_text().splitlines():
@@ -63,6 +82,15 @@ def main():
             page.locator("iframe").first.wait_for(timeout=30000)
             frame = page.frame_locator("iframe").first
             frame.locator(".acct").first.wait_for(timeout=30000)
+
+            def subscription_card():
+                windowed = frame.locator(".acct:has(.meter-fill)")
+                if windowed.count():
+                    return windowed.first
+                preferred = frame.locator(
+                    ".acct[data-provider='claude'], .acct[data-provider='codex']")
+                return preferred.first if preferred.count() else frame.locator(".acct").first
+
             page.wait_for_timeout(1200)
 
             src = page.locator("iframe").first.get_attribute("src")
@@ -78,7 +106,7 @@ def main():
             })
             page.screenshot(path=str(SHOTS / "panel-02-cards.png"), full_page=True)
 
-            frame.locator(".acct").first.click()
+            subscription_card().click()
             frame.locator("#detail .dt-head").first.wait_for(timeout=20000)
             page.wait_for_timeout(1500)
             result["detail_sections"] = frame.locator("#detail .sec").count()
@@ -89,6 +117,28 @@ def main():
 
             result["horizontal_overflow_px"] = page.evaluate(
                 "() => document.documentElement.scrollWidth - window.innerWidth")
+
+            responsive = {}
+            for width, height in ((390, 844), (590, 960), (980, 844), (1440, 960)):
+                page.set_viewport_size({"width": width, "height": height})
+                back = frame.locator("#back:not(.hidden)")
+                if back.count():
+                    back.click()
+                frame.locator(".acct").first.wait_for(timeout=30000)
+                page.wait_for_timeout(300)
+                listing = frame.locator("body").evaluate(RESPONSIVE_METRICS, "#accounts")
+                subscription_card().click()
+                frame.locator("#detail .dt-head").first.wait_for(timeout=20000)
+                page.wait_for_timeout(300)
+                detail = frame.locator("body").evaluate(RESPONSIVE_METRICS, "#detail")
+                iframe_rect = page.locator("iframe").first.evaluate(
+                    "el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,width:r.width}; }")
+                responsive[str(width)] = {
+                    "iframe": iframe_rect, "list": listing, "detail": detail,
+                }
+                if width == 390:
+                    page.screenshot(path=str(SHOTS / "panel-04-mobile.png"), full_page=True)
+            result["responsive"] = responsive
             ctx.close()
 
     result["console_problems"] = problems[:10]
@@ -108,6 +158,11 @@ def main():
         failures.append("key prompt shown although the panel login state exists")
     if result.get("detail_sections", 0) < 5:
         failures.append("detail view incomplete")
+    for width, metrics in result.get("responsive", {}).items():
+        if not metrics.get("list", {}).get("ok"):
+            failures.append(f"list overflows inside plugin iframe at {width}px")
+        if not metrics.get("detail", {}).get("ok"):
+            failures.append(f"detail overflows inside plugin iframe at {width}px")
     if failures:
         print("FAILED: " + "; ".join(failures))
         return 1

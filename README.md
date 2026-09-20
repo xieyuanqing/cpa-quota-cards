@@ -125,13 +125,14 @@ when both live on the same host.
 ### 3. Verify
 
 ```bash
-scripts/verify_service.py     # drives the standalone page in a real browser
-scripts/verify_panel.py       # logs into the panel, clicks the sidebar entry, asserts the cards
-scripts/verify_i18n.py        # flips the panel language and asserts the page follows it
-scripts/make_readme_shots.py  # regenerates docs/*.png, masking account identifiers
+scripts/verify_service.py       # drives the standalone page in a real browser
+scripts/verify_panel.py         # panel integration plus 390/590/980/1440 px iframe checks
+scripts/verify_responsive.py    # standalone list/detail containment from 320 through 1440 px
+scripts/verify_i18n.py          # flips the panel language and asserts the page follows it
+scripts/make_readme_shots.py    # regenerates docs/*.png, masking account identifiers
 ```
 
-Both print a JSON report and a PASS/FAIL line; screenshots land in `shots/`. See
+The verification scripts print JSON reports and PASS/FAIL lines; screenshots land in `shots/`. See
 [VERIFICATION.md](VERIFICATION.md) for one real run.
 
 Panel-side scripts must be pointed at the **origin your reverse proxy serves**
