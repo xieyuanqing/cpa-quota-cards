@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	version           = "0.1.2"
+	version           = "0.1.3"
 	pluginID          = "cpa-quota-cards"
 	defaultServiceURL = "http://127.0.0.1:18390/usage/"
 )
