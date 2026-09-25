@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cpa_usage as U  # noqa: E402
+import claude_capacity as CC  # noqa: E402
 
 
 def _base_url(name, default):
@@ -328,6 +329,18 @@ def collect(force: bool = False) -> dict:
         block = shape_window(con, prices, history, "claude", kind, label, w, usage,
                              w.get("reset_at_ms"), w.get("reset_at_ms"),
                              "oauth_live", U.now_ms(), start)
+        # Per-request back-calculation from the quota headers CPA already stores.
+        try:
+            split = CC.current_summary(kind, w.get("reset_at_ms"))
+        except Exception as exc:  # noqa: BLE001
+            split = {"error": "%s: %s" % (type(exc).__name__, exc)}
+        block["cpa_split"] = split
+        if split and isinstance(split.get("capacity"), (int, float)):
+            cap = float(split["capacity"])
+            block["est_total_cost"], block["est_basis"] = cap, "per_request"
+            block["per_percent_cost"] = round(cap / 100.0, 4)
+            block["est_remaining_cost"] = round(cap * (block["remaining_percent"] or 0) / 100.0, 2)
+            block["forecast"] = forecast(w, usage, cap, None)
         block["models"] = window_models(con, prices, "claude", start,
                                         w.get("reset_at_ms")) if start else []
         c_windows.append(block)

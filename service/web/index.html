@@ -254,6 +254,18 @@ basisCol2:['反推依据','Derived from'],
 basisHistory:['历史采样过原点回归','history samples, through-origin regression'],
 basisThisWindow:['本窗口已花 ÷ 已用百分点','spend this window ÷ percentage points used'],
 basisInsufficient:['不足','insufficient'],
+basisPerRequest:['逐请求反推(只用 CPA 连续使用的时段,取中位数)','per-request back-calculation (CPA-only stretches, median)'],
+splitTitle:['CPA / APP 拆分','CPA / app split'],
+splitSub:['CPA 每个请求的响应头都带额度百分比。只取 CPA 连续在用的时段(3 个百分点在 1.5 小时内涨完)反推总额度,取中位数;剩下涨的百分点算作 APP 等外部用量。','Every CPA response carries the quota percentage. Only stretches where CPA alone moved 3 points within 1.5 h are used to back-calculate total capacity (median); the rest of the percentage is attributed to the app / other clients.'],
+splitCap:['总额度(100%)≈','Total capacity (100%) ≈'],
+splitBasisThis:['本窗口 {0} 段','{0} segments this window'],
+splitBasisPrev:['本窗口段数不足,借用历史 {0} 段','too few this window, {0} historical segments'],
+splitCpa:['CPA 用掉','Used via CPA'],
+splitApp:['APP / 其他用掉(推算)','Used by app / other (inferred)'],
+splitCum:['累计反推(假设全是 CPA)','Cumulative estimate (assuming all CPA)'],
+splitCumShort:['累计','cum'],
+splitHist:['历史窗口','Past windows'],
+splitLegend:['每行:时间 · 已用% / CPA 累计花费 · 累计反推 · 最近 3 个百分点用时 / 右侧为最近 3 点的局部反推。带 * 的段用时太长,可能混入 APP,不参与计算。局部反推突然明显变小,多半说明那段时间 APP 也在用。','Each row: time · used % / CPA spend so far · cumulative estimate · time for the last 3 points / right: local estimate over the last 3 points. Rows with * took too long and may include app usage, so they are excluded. A sudden drop in the local estimate usually means the app was used then.'],
 regSamples:['回归样本','Regression samples'],
 samplesFmt:['{0} 段 / {1} 个窗口 · 离散 ±{2}%','{0} segments / {1} windows · spread ±{2}%'],
 samplesNone:['暂无(单窗口折算)','none yet (single-window scaling)'],
@@ -388,6 +400,29 @@ function cardTag(a){
   return{tone:'good',text:t('tagOk')};
 }
 
+function splitHtml(s){
+  if(s.error)return `<div class="card sec"><h4 style="font-size:15px">${t('splitTitle')}</h4><div class="basis warn">${esc(s.error)}</div></div>`;
+  const traj=(s.trajectory||[]).slice().reverse().slice(0,40);
+  const hist=(s.history||[]).slice().reverse();
+  return `<div class="card sec">
+    <h4 style="font-size:15px">${t('splitTitle')}</h4>
+    <p class="sec-sub">${t('splitSub')}</p>
+    <div class="rows">
+      <div><dt>${t('splitCap')}</dt><dd>${s.capacity?money2(s.capacity):'—'} <span class="src">${s.basis==='previous_windows'?t('splitBasisPrev',s.pool_steps):t('splitBasisThis',s.clean_steps)}${s.clean_min?' · '+money2(s.clean_min)+' ~ '+money2(s.clean_max):''}</span></dd></div>
+      <div><dt>${t('splitCpa')}</dt><dd>${s.cpa_pct!==undefined?pct(s.cpa_pct):'—'} <span class="src">(${money2(s.cpa_cost)})</span></dd></div>
+      <div><dt>${t('splitApp')}</dt><dd>${s.app_pct!==undefined?pct(s.app_pct):'—'}</dd></div>
+      <div><dt>${t('splitCum')}</dt><dd>${s.cum_est?money2(s.cum_est):'—'}</dd></div>
+      <div><dt>${t('estLeft')}</dt><dd>${s.remaining_cost!==undefined?money2(s.remaining_cost):'—'}</dd></div>
+      ${hist.length?`<div><dt>${t('splitHist')}</dt><dd>${hist.map(h=>`${short(h.start_ms)} · ${pct(h.final_used)} · CPA ${money2(h.cost)} · ${h.capacity?money2(h.capacity):'—'}`).join('<br>')}</dd></div>`:''}
+    </div>
+    ${traj.length?`<div class="models" style="margin-top:12px">${traj.map(p=>`<div>
+      <span class="m-name">${short(p.ts)} · ${pct(p.used)}</span>
+      <span class="m-tok">CPA ${money2(p.cost)} · ${t('splitCumShort')} ${p.cum_est?money2(p.cum_est):'—'}${p.step_hours!==null&&p.step_hours!==undefined?' · '+p.step_hours+'h':''}</span>
+      <span class="m-cost"${p.step_est&&!p.clean?' style="opacity:.45"':''}>${p.step_est!==null&&p.step_est!==undefined?money2(p.step_est):'—'}${p.step_est&&!p.clean?' *':''}</span></div>`).join('')}</div>
+    <div class="basis">${t('splitLegend')}</div>`:''}
+  </div>`;
+}
+
 function detailHtml(a){
   const title=esc(a.provider_label||a.provider);
   let out=`<div class="sec-title">${t('acctDetail')}</div>
@@ -447,12 +482,13 @@ function detailHtml(a){
       <p class="sec-sub">${t('capacitySub')}</p>
       <div class="rows">
         <div><dt>${t('fullWindowCap')}</dt><dd>${money2(w.est_total_cost)}</dd></div>
-        <div><dt>${t('basisCol2')}</dt><dd>${w.est_basis==='history'?t('basisHistory'):(w.est_basis==='this_window'?t('basisThisWindow'):t('basisInsufficient'))}</dd></div>
+        <div><dt>${t('basisCol2')}</dt><dd>${w.est_basis==='per_request'?t('basisPerRequest'):(w.est_basis==='history'?t('basisHistory'):(w.est_basis==='this_window'?t('basisThisWindow'):t('basisInsufficient')))}</dd></div>
         <div><dt>${t('regSamples')}</dt><dd>${cap.samples?t('samplesFmt',cap.samples,cap.windows,cap.spread_pct):t('samplesNone')}</dd></div>
         ${cap.per_percent?`<div><dt>${t('regSlope')}</dt><dd>${money(cap.per_percent)}${t('perPoint','')}</dd></div>`:''}
         <div><dt>${t('fullWindows')}</dt><dd>${(w.full_windows&&w.full_windows.length)?w.full_windows.map(f=>`${short(f.window_start_ms)} → ${money2(f.cost)}`).join('<br>'):t('none')}</dd></div>
       </div>
     </div>
+    ${w.cpa_split?splitHtml(w.cpa_split):''}
 
     <div class="card sec">
       <h4 style="font-size:15px">${t('modelMix')}</h4>
