@@ -41,7 +41,29 @@ Clicking a card opens the full analysis: quota forecast, capacity back-calculati
 | --- | --- |
 | Spend | every request's `normalized_*` token counts × official per-token price (input / output / cache read / cache write) |
 | Quota used | the percentage the upstream reports: Claude via the Anthropic OAuth usage endpoint, Codex via response headers |
-| Capacity | `total Δspend ÷ total Δpercentage` over a window (a through-origin fit), not a per-segment median |
+| Capacity | Codex: `total Δspend ÷ total Δpercentage` over a window (a through-origin fit). Claude: per-request back-calculation, see below |
+
+### Claude: CPA vs. app usage
+
+A Claude subscription is also used outside the proxy (claude.ai, the mobile app), so its quota
+percentage includes spend the proxy never sees. Every Claude response carries
+`anthropic-ratelimit-unified-{5h,7d}-utilization` headers, and CPA Manager Plus keeps them per
+request, so `service/claude_capacity.py` replays the requests in order:
+
+* each time the percentage goes up, the CPA spend over the last 3 points gives a local estimate
+  of "100% ≈ $X";
+* only stretches where those 3 points were reached within 1.5 h count as CPA-only; slower ones
+  are shown but excluded, because that is where other clients most likely chipped in;
+* capacity is the **median** of the CPA-only estimates (earlier windows are borrowed when the
+  current one has fewer than 3);
+* `CPA share = CPA spend ÷ capacity`, and the rest of the used percentage is reported as
+  app/other usage.
+
+A sudden drop in the local estimate while the proxy is busy is the tell-tale sign that the app was
+used in that stretch. The upstream percentage is whole-number precision, so single estimates are
+noisy; the median is what the page shows. No extra upstream calls are made — it only reads what
+is already in the manager database. Run `python3 service/claude_capacity.py` (or `--5h`) for a
+per-window text dump.
 
 Two deliberate omissions: there is no "estimated time to exhaustion" and no scheduler/notification.
 The plugin shows numbers; it never acts on them.
